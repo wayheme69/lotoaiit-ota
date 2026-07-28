@@ -22,7 +22,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 MONTHS = {m: i + 1 for i, m in enumerate(
     ["January", "February", "March", "April", "May", "June",
@@ -33,6 +33,11 @@ EJ_CSV = "https://raw.githubusercontent.com/asderfvfv/eurojackpot-data/main/data
 LOTTOLAND_SE = "https://media.lottoland.com/api/drawings/superEnalotto"
 LOTTOLAND_EJ = "https://media.lottoland.com/api/drawings/euroJackpot"
 EJNET = "https://www.euro-jackpot.net/results"
+
+# Borne de dates : rien avant 1997 (SE) / 2012 (EJ), rien apres demain — une typo
+# d'annee amont ("2062-…") polluait sinon it_recent.json DURABLEMENT (revue 28/07).
+def max_date():
+    return (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
 
 
 def curl(url, extra=None, timeout=60):
@@ -54,6 +59,8 @@ def parse_se_page(html):
         if mon not in MONTHS:
             continue
         d = f"{int(yy):04d}-{MONTHS[mon]:02d}-{int(dd):02d}"
+        if not ("1997-01-01" <= d <= max_date()):
+            raise SystemExit(f"SE: date hors plage {d}")
         nums = sorted(int(x) for x in SE_NUM.findall(body))
         jm = SE_JOLLY.search(body)
         if len(nums) != 6 or not jm:
@@ -123,7 +130,7 @@ def fetch_ej():
     draws = []
     for line in lines[-14:]:
         c = line.split(",")
-        if len(c) != 8 or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", c[0]):
+        if len(c) != 8 or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", c[0])                 or not ("2012-01-01" <= c[0] <= max_date()):
             continue
         nums = sorted(int(x) for x in c[1:6])
         euros = sorted(int(x) for x in c[6:8])
@@ -133,7 +140,15 @@ def fetch_ej():
         draws.append({"date": c[0], "numbers": nums, "euros": euros})
     if not draws:
         raise SystemExit("EJ: aucun tirage parsé")
-    return sorted(draws, key=lambda x: x["date"], reverse=True)
+    draws = sorted(draws, key=lambda x: x["date"], reverse=True)
+    # Sonde de fraicheur (modele « anti-retard Caixa » BR, revue 28/07) : mar/ven
+    # -> ecart normal max 4 j + marge publication. Au-dela : Action ROUGE, alerte,
+    # au lieu d'un flux verrouille sur un CSV tiers gele (mode de panne Magayo).
+    age = (datetime.now(timezone.utc).date()
+           - datetime.strptime(draws[0]["date"], "%Y-%m-%d").date()).days
+    if age > 6:
+        raise SystemExit(f"EJ: source asderfvfv périmée — dernier tirage {draws[0]['date']} ({age} j)")
+    return draws
 
 
 def fetch_ej_next():
@@ -160,8 +175,11 @@ def fetch_ej_next():
 
 def merge(old_draws, fresh, key="date", cap=12):
     by = {}
+    # L'existant est aussi borne -> un JSON deja pollue par une date fantome
+    # s'auto-guerit au run suivant (revue 28/07).
     for r in old_draws or []:
-        by[r[key]] = r
+        if "1997-01-01" <= r.get(key, "") <= max_date():
+            by[r[key]] = r
     for r in fresh:
         by[r[key]] = r
     return sorted(by.values(), key=lambda x: x[key], reverse=True)[:cap]
