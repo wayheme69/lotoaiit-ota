@@ -1,7 +1,20 @@
 {
- "updated": "2026-07-29T07:08:26Z",
+ "updated": "2026-07-30T19:56:42Z",
  "superenalotto": {
   "draws": [
+   {
+    "date": "2026-07-30",
+    "concorso": 121,
+    "numbers": [
+     20,
+     47,
+     75,
+     76,
+     78,
+     89
+    ],
+    "jolly": 9
+   },
    {
     "date": "2026-07-28",
     "concorso": 120,
