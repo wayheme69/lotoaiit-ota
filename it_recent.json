@@ -1,7 +1,20 @@
 {
- "updated": "2026-08-25T20:50:16Z",
+ "updated": "2026-08-27T20:35:22Z",
  "superenalotto": {
   "draws": [
+   {
+    "date": "2026-08-27",
+    "concorso": 137,
+    "numbers": [
+     2,
+     27,
+     28,
+     50,
+     75,
+     84
+    ],
+    "jolly": 32
+   },
    {
     "date": "2026-08-25",
     "concorso": 136,
@@ -144,24 +157,11 @@
      63
     ],
     "jolly": 68
-   },
-   {
-    "date": "2026-08-06",
-    "concorso": 125,
-    "numbers": [
-     2,
-     11,
-     20,
-     33,
-     74,
-     83
-    ],
-    "jolly": 15
    }
   ],
   "next": {
-   "date": "2026-08-27",
-   "jackpot_eur": 215100000
+   "date": "2026-08-28",
+   "jackpot_eur": 215900000
   }
  },
  "eurojackpot": {
