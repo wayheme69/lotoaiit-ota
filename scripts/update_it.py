@@ -11,7 +11,12 @@ BRUYANT, no-op réel quand rien ne change, fusion avec l'existant pour résilien
     La même page fournit le PROCHAIN tirage (nextDrawDate inline) + jackpot
     (topBarJackpotValueNumber).
   • EuroJackpot : asderfvfv/eurojackpot-data (CSV raw GitHub, prod LOTTO AI DE,
-    MAJ soir de tirage) ; next jackpot via Lottoland, fallback euro-jackpot.net.
+    MAJ soir de tirage) + euro-jackpot.net/results (10 derniers tirages HTML) +
+    Lottoland (dernier tirage) — les 3 sont FUSIONNÉES, la sonde de fraîcheur
+    (> 6 j) ne s'applique qu'au tirage le plus récent toutes sources confondues.
+    Leçon 04/09/2026 : le CSV asderfvfv a eu 3 j de retard → 5 runs rouges pour
+    rien alors que euro-jackpot.net avait le tirage. Next jackpot via Lottoland,
+    fallback euro-jackpot.net.
 
 Sorties : it_recent.json
   {"updated", "superenalotto": {"draws":[{date,concorso,numbers[6],jolly}], "next":{date,jackpot_eur}},
@@ -122,36 +127,106 @@ def fetch_se():
 
 # ----------------------------- EuroJackpot -----------------------------
 
-def fetch_ej():
+def _ej_check(d, nums, euros, src):
+    if not ("2012-01-01" <= d <= max_date()):
+        raise SystemExit(f"EJ {src}: date hors plage {d}")
+    if len(set(nums)) != 5 or not all(1 <= n <= 50 for n in nums) \
+            or len(set(euros)) != 2 or not all(1 <= e <= 12 for e in euros):
+        raise SystemExit(f"EJ {src}: valeurs invalides {d}: {nums}+{euros}")
+    return {"date": d, "numbers": sorted(nums), "euros": sorted(euros)}
+
+
+def fetch_ej_csv():
+    """asderfvfv CSV → liste de tirages (peut être en retard de quelques jours)."""
     body = curl(EJ_CSV)
     lines = body.strip().splitlines()
     if len(lines) < 100 or not lines[0].startswith("Date,"):
-        raise SystemExit("EJ: CSV asderfvfv illisible")
+        print("  EJ: CSV asderfvfv illisible", file=sys.stderr)
+        return []
     draws = []
     for line in lines[-14:]:
         c = line.split(",")
-        if len(c) != 8 or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", c[0])                 or not ("2012-01-01" <= c[0] <= max_date()):
+        if len(c) != 8 or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", c[0]):
             continue
-        nums = sorted(int(x) for x in c[1:6])
-        euros = sorted(int(x) for x in c[6:8])
-        if len(set(nums)) != 5 or not all(1 <= n <= 50 for n in nums) \
-                or len(set(euros)) != 2 or not all(1 <= e <= 12 for e in euros):
-            raise SystemExit(f"EJ: valeurs invalides {c}")
-        draws.append({"date": c[0], "numbers": nums, "euros": euros})
+        draws.append(_ej_check(c[0], [int(x) for x in c[1:6]], [int(x) for x in c[6:8]], "csv"))
+    return draws
+
+
+EJNET_BLOCK = re.compile(r'<div class="date sprite">(.*?)</div>(.*?)</ul>', re.S)
+EJNET_BALL = re.compile(r'<li class="(ball|euro)[^"]*"><span>(\d{1,2})</span></li>')
+
+
+def fetch_ej_net():
+    """euro-jackpot.net/results → 10 derniers tirages (HTML : « Friday 4<sup>th</sup> September 2026 »)."""
+    html = curl(EJNET)
+    if "euro-jackpot" not in html:
+        html = curl(f"https://r.jina.ai/{EJNET}", ["-H", "X-Return-Format: html"], 90)
+    draws = []
+    for dtxt, body in EJNET_BLOCK.findall(html):
+        dtxt = re.sub(r"<[^>]+>", " ", dtxt)
+        m = re.search(r"(\d{1,2})\s*(?:st|nd|rd|th)?\s+(\w+)\s+(\d{4})", dtxt)
+        if not m or m.group(2) not in MONTHS:
+            continue
+        d = f"{int(m.group(3)):04d}-{MONTHS[m.group(2)]:02d}-{int(m.group(1)):02d}"
+        balls = EJNET_BALL.findall(body)
+        nums = [int(n) for k, n in balls if k == "ball"]
+        euros = [int(n) for k, n in balls if k == "euro"]
+        if len(nums) != 5 or len(euros) != 2:
+            continue
+        draws.append(_ej_check(d, nums, euros, "ejnet"))
     if not draws:
-        raise SystemExit("EJ: aucun tirage parsé")
-    draws = sorted(draws, key=lambda x: x["date"], reverse=True)
+        print("  EJ: euro-jackpot.net illisible", file=sys.stderr)
+    return draws
+
+
+def fetch_ej_lottoland():
+    """Lottoland → 1 tirage (le dernier)."""
+    body = curl(LOTTOLAND_EJ)
+    if not body.startswith("{"):
+        return []
+    last = (json.loads(body).get("last") or {})
+    dd = last.get("date") or {}
+    nums = [int(x) for x in (last.get("numbers") or [])]
+    euros = [int(x) for x in (last.get("euroNumbers") or [])]
+    if len(nums) == 5 and len(euros) == 2 and {"year", "month", "day"} <= set(dd):
+        d = f"{dd['year']:04d}-{dd['month']:02d}-{dd['day']:02d}"
+        return [_ej_check(d, nums, euros, "lottoland")]
+    return []
+
+
+def fetch_ej():
+    """Fusion CSV + euro-jackpot.net + Lottoland ; échec BRUYANT seulement si TOUT est périmé."""
+    by = {}
+    for name, fn in (("csv", fetch_ej_csv), ("ejnet", fetch_ej_net), ("lottoland", fetch_ej_lottoland)):
+        try:
+            got = fn()
+        except SystemExit:
+            raise
+        except Exception as e:  # réseau/parse d'UNE source → on passe à la suivante
+            print(f"  EJ {name}: {e}", file=sys.stderr)
+            got = []
+        for r in got:
+            prev = by.get(r["date"])
+            if prev and prev != r:
+                raise SystemExit(f"EJ: sources en désaccord le {r['date']}: {prev} vs {r} ({name})")
+            by.setdefault(r["date"], r)
+        print(f"  EJ {name}: {len(got)} tirage(s)", file=sys.stderr)
+    if not by:
+        raise SystemExit("EJ: aucun tirage parsé (3 sources KO)")
+    draws = sorted(by.values(), key=lambda x: x["date"], reverse=True)
     # Sonde de fraicheur (modele « anti-retard Caixa » BR, revue 28/07) : mar/ven
     # -> ecart normal max 4 j + marge publication. Au-dela : Action ROUGE, alerte,
     # au lieu d'un flux verrouille sur un CSV tiers gele (mode de panne Magayo).
     age = (datetime.now(timezone.utc).date()
            - datetime.strptime(draws[0]["date"], "%Y-%m-%d").date()).days
     if age > 6:
-        raise SystemExit(f"EJ: source asderfvfv périmée — dernier tirage {draws[0]['date']} ({age} j)")
+        raise SystemExit(f"EJ: les 3 sources sont périmées — dernier tirage {draws[0]['date']} ({age} j)")
     return draws
 
 
-def fetch_ej_next():
+def fetch_ej_next(last_draw):
+    """next = {date, jackpot_eur} ; Lottoland, sinon euro-jackpot.net (jackpot) +
+    date calculée : 1er mardi/vendredi strictement après le dernier tirage connu."""
     body = curl(LOTTOLAND_EJ)
     if body.startswith("{"):
         j = json.loads(body)
@@ -167,7 +242,11 @@ def fetch_ej_next():
     html = curl(EJNET)
     mj = re.search(r"Next\s+Jackpot.*?€(\d+(?:\.\d+)?)\s*Million", html, re.S | re.I)
     if mj:
-        return {"jackpot_eur": int(float(mj.group(1)) * 1_000_000)}
+        nd = max(datetime.strptime(last_draw, "%Y-%m-%d").date() + timedelta(days=1),
+                 datetime.now(timezone.utc).date())
+        while nd.weekday() not in (1, 4):  # mardi, vendredi
+            nd += timedelta(days=1)
+        return {"date": nd.strftime("%Y-%m-%d"), "jackpot_eur": int(float(mj.group(1)) * 1_000_000)}
     raise SystemExit("EJ next: Lottoland ET euro-jackpot.net ont échoué")
 
 
@@ -193,7 +272,7 @@ except (OSError, ValueError):
 
 se_draws, se_next = fetch_se()
 ej_draws = fetch_ej()
-ej_next = fetch_ej_next()
+ej_next = fetch_ej_next(ej_draws[0]["date"])
 
 content = {
     "superenalotto": {
