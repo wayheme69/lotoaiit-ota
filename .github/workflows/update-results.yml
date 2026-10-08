@@ -13,13 +13,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # v3 app feed (numbers only) — must never be broken
       - name: Fetch latest results
         run: python3 scripts/update_it.py
+      # v4 app feed (SuperEnalotto + Eurojackpot with the real prizes in Italy)
+      - name: Fetch results with prizes (v4)
+        run: python3 scripts/it_results.py
       - name: Commit if changed
         run: |
           git config user.name "results-bot"
           git config user.email "actions@github.com"
-          git add it_recent.json
+          git add it_recent.json it_results.json
           if ! git diff --cached --quiet; then
             git commit -m "results: $(date -u +%Y-%m-%dT%H:%MZ)"
             git pull --rebase origin main
