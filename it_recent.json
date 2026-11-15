@@ -1,7 +1,20 @@
 {
- "updated": "2026-11-13T23:40:54Z",
+ "updated": "2026-11-15T02:00:04Z",
  "superenalotto": {
   "draws": [
+   {
+    "date": "2026-11-14",
+    "concorso": 183,
+    "numbers": [
+     26,
+     40,
+     49,
+     64,
+     66,
+     74
+    ],
+    "jolly": 61
+   },
    {
     "date": "2026-11-13",
     "concorso": 182,
@@ -144,24 +157,11 @@
      70
     ],
     "jolly": 29
-   },
-   {
-    "date": "2026-10-24",
-    "concorso": 171,
-    "numbers": [
-     11,
-     17,
-     32,
-     50,
-     73,
-     80
-    ],
-    "jolly": 62
    }
   ],
   "next": {
-   "date": "2026-11-14",
-   "jackpot_eur": 54300000
+   "date": "2026-11-17",
+   "jackpot_eur": 55100000
   }
  },
  "eurojackpot": {
